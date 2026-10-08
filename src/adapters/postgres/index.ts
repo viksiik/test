@@ -186,23 +186,21 @@ export function createPostgresStorage(url: string): PostgresStorage {
         return rows[0] ? toTicket(rows[0]) : null;
       },
       async listQueue(eventId) {
+        const cols = TICKET_COLS.split(', ')
+          .map((col) => `t.${col}`)
+          .join(', ');
         const { rows } = await db.query(
-          `SELECT ${TICKET_COLS} FROM tickets WHERE event_id = $1 ORDER BY created_at, id`,
+          `SELECT ${cols}, v.name AS volunteer_name
+             FROM tickets t
+             LEFT JOIN volunteers v ON v.id = t.volunteer_id
+            WHERE t.event_id = $1
+            ORDER BY t.created_at, t.id`,
           [eventId],
         );
-        const items: { ticket: Ticket; volunteerName: string | null }[] = [];
-        for (const r of rows) {
-          const ticket = toTicket(r);
-          let volunteerName: string | null = null;
-          if (ticket.volunteerId) {
-            const v = await db.query('SELECT name FROM volunteers WHERE id = $1', [
-              ticket.volunteerId,
-            ]);
-            volunteerName = (v.rows[0]?.name as string | undefined) ?? null;
-          }
-          items.push({ ticket, volunteerName });
-        }
-        return items;
+        return rows.map((r) => ({
+          ticket: toTicket(r),
+          volunteerName: (r.volunteer_name as string | null) ?? null,
+        }));
       },
       async history(ticketId) {
         const { rows } = await db.query(
