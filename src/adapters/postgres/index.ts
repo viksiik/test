@@ -96,7 +96,8 @@ function txOps(db: Db, c: pg.PoolClient): TicketTx {
     },
     async insert(t) {
       const { rowCount } = await db.query(
-        `INSERT INTO tickets (${TICKET_COLS}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        `INSERT INTO tickets (${TICKET_COLS}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (idempotency_key) DO NOTHING`,
         [
           t.id,
           t.eventId,
