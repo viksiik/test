@@ -1,0 +1,18 @@
+# Вихід перевірок на чорновику структури (до виправлень)
+$ npm run deps:check
+
+  error module-public-api-only: src/modules/tickets/service.ts → src/modules/volunteers/ports.ts
+  error module-public-api-only: src/modules/tickets/service.ts → src/modules/volunteers/domain.ts
+  error module-public-api-only: src/modules/tickets/domain.ts → src/modules/volunteers/domain.ts
+  error domain-is-pure: src/modules/tickets/domain.ts → node_modules/fastify/fastify.js
+
+x 4 dependency violations (4 errors, 0 warnings). 23 modules, 54 dependencies cruised.
+
+$ npm run lint
+
+src/platform/version.ts
+  4:7   error  'process.env' is restricted from being used. Читайте env лише через src/config  no-restricted-properties
+  4:35  error  'process.env' is restricted from being used. Читайте env лише через src/config  no-restricted-properties
+
+✖ 2 problems (2 errors, 0 warnings)
+
