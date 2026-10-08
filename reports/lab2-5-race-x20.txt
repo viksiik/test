@@ -1,0 +1,1 @@
+concurrency suite: 20/20 прогонів зелені
