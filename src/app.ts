@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { createMemoryStorage } from './adapters/memory/index.js';
+import { createPostgresStorage } from './adapters/postgres/index.js';
 import type { AppConfig } from './config/index.js';
 import { createEventService } from './modules/events/index.js';
 import { createTicketService } from './modules/tickets/index.js';
@@ -17,7 +18,10 @@ export function buildApp(config: AppConfig): FastifyInstance {
   const version = resolveVersion(config.gitSha);
   registerErrorHandler(app);
 
-  const storage = createMemoryStorage(); // прототип: статичні дані, БД — наступний крок
+  const pgStorage =
+    config.storage === 'postgres' ? createPostgresStorage(config.databaseUrl) : null;
+  const storage = pgStorage ?? createMemoryStorage();
+  if (pgStorage) app.addHook('onClose', () => pgStorage.db.close());
   const events = createEventService(storage.events);
   const volunteers = createVolunteerService(storage.volunteers);
   const tickets = createTicketService(storage.tickets, events, volunteers);
@@ -25,6 +29,7 @@ export function buildApp(config: AppConfig): FastifyInstance {
 
   app.get('/health', async () => ({ status: 'ok' })); // liveness: процес живий
   app.get('/health/ready', async () => {
+    await pgStorage?.db.ping(); // readiness: джерело даних відповідає, інакше 503
     return { status: 'ready', storage: config.storage };
   });
   app.get('/version', async () => ({ name: 'repair-cafe', version, storage: config.storage }));

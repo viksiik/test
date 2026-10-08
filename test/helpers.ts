@@ -14,6 +14,10 @@ export const config = { ...loadConfig(), logLevel: 'silent' };
 export async function freshApp(): Promise<FastifyInstance> {
   const app = buildApp(config);
   await app.ready();
+  if (config.storage === 'postgres') {
+    const { resetDatabase } = await import('../scripts/db.js');
+    await resetDatabase(config.databaseUrl);
+  }
   return app;
 }
 
