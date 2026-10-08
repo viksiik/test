@@ -1,79 +1,44 @@
-# Spec — Repair Café (Лаба 1: структура)
+# Spec — Repair Café
 
-**Що і навіщо.** HTTP API черги ремонтів на сесіях Repair Café. Інваріанти: (I1) у кожної речі
-в роботі рівно один майстер, і він уміє лагодити її категорію; (I2) майстер має ≤ 1 річ `in_repair`;
-(I3) активних речей у сесії ≤ `ticket_limit`; (I4) повтор реєстрації не створює дубль.
+**Що і навіщо.** HTTP API черги ремонтів на сесіях Repair Café. Інваріанти: (I1) у речі в роботі рівно
+один майстер, і він уміє лагодити її категорію; (I2) майстер має ≤ 1 річ `in_repair`; (I3) активних
+речей у сесії ≤ `ticket_limit`; (I4) повтор запиту з тим самим `Idempotency-Key` не створює дубль, а
+той самий ключ з іншим тілом — помилка. **Інваріанти I2–I4 тримає БД** (lock / constraint), а не лише код.
 
 ## 1. Модулі та межі
 
-| Модуль               | Відповідальність                                   | Може залежати від                    |
-| -------------------- | -------------------------------------------------- | ------------------------------------ |
-| `modules/events`     | сесії кафе: час, ліміт черги, відкрита/закрита     | `shared`                             |
-| `modules/volunteers` | майстри та їхні навички                            | `shared`                             |
-| `modules/tickets`    | черга речей, взяття в роботу, машина статусів      | `shared`, API `events`, `volunteers` |
-| `platform`           | HTTP (Fastify), мапінг помилок, версія             | `shared`, API модулів                |
-| `config`             | єдине місце читання `process.env`                  | —                                    |
-| `shared`             | `DomainError`, `Id`, **`Category`** (спільне ядро) | —                                    |
-| `app.ts`             | composition root                                   | усе                                  |
-
-Всередині модуля: `domain.ts` (типи + чисті правила) → `service.ts` (сценарії) → `ports.ts`
-(інтерфейси сховищ; реалізації — Лаба 2). **Правила меж:** (R1) інший модуль — лише через `index.ts`;
-(R2) `domain.ts` залежить лише від `shared`; (R3) модулі не імпортують `platform`; (R4) `shared` — лист;
-(R5) без циклів. Поняття, потрібне доменам двох модулів, живе в `shared`. Усе перевіряє `make deps`.
+`modules/{events,volunteers,tickets}` — domain → service → ports. `adapters/{memory,postgres}` — реалізації
+портів; `app.ts` обирає одну за `STORAGE`. `platform/http` — маршрути й мапінг помилок. `shared` — `DomainError`,
+`UnavailableError`, `Id`, `Category`. Правила R1–R6 (`make deps`): модуль бачать лише через `index.ts`;
+`domain.ts` залежить лише від `shared`; модулі не знають про `platform`/`adapters`; адаптери — тільки з `app.ts`.
+Read model, що з'єднує таблиці двох модулів (дошка сесії), живе в адаптері — модулі один одного не імпортують.
 
 ## 2. Дані
 
-```mermaid
-erDiagram
-  EVENT ||--o{ TICKET : "queues"
-  VOLUNTEER ||--o{ TICKET : "repairs"
-  TICKET ||--o{ TICKET_TRANSITION : "history"
-  EVENT {
-    uuid id PK
-    text title
-    timestamptz starts_at
-    timestamptz ends_at
-    int ticket_limit
-    text status
-  }
-  VOLUNTEER {
-    uuid id PK
-    text name
-    text_array skills
-  }
-  TICKET {
-    uuid id PK
-    uuid event_id FK
-    uuid volunteer_id FK "null поки в черзі"
-    text visitor_name
-    text item_description
-    text category
-    text status
-    text idempotency_key UK
-    timestamptz created_at
-  }
-  TICKET_TRANSITION {
-    bigint id PK
-    uuid ticket_id FK
-    text from_status
-    text to_status
-    timestamptz at
-  }
-```
+Схема — [migrations/](migrations/): `events`, `volunteers`, `tickets`, `ticket_transitions` (історія, не видаляється).
+Ключові обмеження: `tickets.idempotency_key UNIQUE` (I4), частковий унікальний індекс
+`tickets(volunteer_id) WHERE status='in_repair'` (I2), CHECK на статуси й довжини. Міграції не редагуються після застосування.
 
-Статуси: `queued → in_repair → fixed | not_fixable | needs_parts`; `needs_parts → queued`;
-`queued | needs_parts → withdrawn`. Активні = `queued | in_repair | needs_parts`. Записи не видаляються.
+## 3. Сценарії → очікувана поведінка (HTTP)
 
-## 3. Як дані оновлюються
+| #     | Сценарій                                        | Запити (в одній транзакції)                                                                   | Успіх            | Помилки                                                                  |
+| ----- | ----------------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------ |
+| S1–S2 | `POST /events/:id/tickets` + `Idempotency-Key`  | ключ? → `events FOR UPDATE` → count активних → `INSERT … ON CONFLICT DO NOTHING` → transition | 201 / 200 повтор | 400 схема, 404 сесія, 409 `closed`/`QUEUE_FULL`/`IDEMPOTENCY_KEY_REUSED` |
+| S5    | `POST /tickets/:id/claim`                       | `tickets FOR UPDATE` → навичка → перехід → `UPDATE` (I2 — індекс) → transition                | 200 `in_repair`  | 400 навичка, 404, 409 `VOLUNTEER_BUSY`/`ILLEGAL_TRANSITION`              |
+| S6–S8 | `POST /tickets/:id/{complete,requeue,withdraw}` | `FOR UPDATE` → перевірка переходу/виконавця → `UPDATE` → transition                           | 200              | 409 `NOT_ASSIGNEE`/`ILLEGAL_TRANSITION`                                  |
+| S10   | `GET /events/:id/queue`                         | один `SELECT … LEFT JOIN volunteers`                                                          | 200              | 404                                                                      |
 
-- **Зареєструвати річ** (`tickets.register`): є тікет з цим `idempotency_key` → повернути його → сесія існує й `open` (`NOT_FOUND`/`CONFLICT`) → активних < ліміт (`CONFLICT`) → `INSERT status=queued`. Підрахунок + вставка — одна транзакція (Лаба 2).
-- **Взяти в роботу** (`tickets.claim`): тікет існує → майстер існує → навичка ∋ категорія (`VALIDATION`) → у майстра немає речі `in_repair` (`CONFLICT`) → перехід дозволений → `UPDATE … WHERE status='queued'`; 0 рядків = хтось встиг першим (`CONFLICT`).
-- **Завершити** (`fixed`/`not_fixable`/`needs_parts`): перевірка переходу → оновлення + рядок у `TICKET_TRANSITION`.
+## 4. Збої джерела даних
 
-## 4. Критерії прийняття (Лаба 1)
+БД недоступна / таймаут (5 с statement, 2 с connect) → **503 + `Retry-After: 5`**, деталі не витікають, процес живий;
+`/health` — liveness (200), `/health/ready` — readiness (503). Deadlock/serialization → транзакція повторюється
+цілком ≤ 3 разів з backoff. Клієнт повторює POST з тим самим ключем — дубля не буде (I4).
 
-- [x] AC1 `make check` зелений: формат, лінт, типи, архітектура R1–R5, smoke, збірка.
-- [x] AC2 Брудний коміт блокується hook-ом — `make hook-demo` → `OK`.
-- [x] AC3 `GET /health` → 200; `GET /version` → поточний git sha.
-- [x] AC4 Структура `src/` дорівнює таблиці §1; порушення меж ловить `make deps`.
-- [x] AC5 Помилки домену — `DomainError` з кодом; HTTP-статус визначає лише `platform`. Перевірка: smoke-тест.
+## 5. Критерії прийняття (Лаба 2)
+
+- [x] AC6 S1–S10 зелені і на статиці, і на БД — `make scenarios`, `make scenarios-db`.
+- [x] AC7 Той самий ключ з іншим тілом → 409 `IDEMPOTENCY_KEY_REUSED` — тест C5.
+- [x] AC8 I1–I4 під паралельними запитами — C1–C4, `make race` 20/20.
+- [x] AC9 Дошка сесії: ≤ 2 SQL-запити незалежно від N — Q1, `make n1-report`.
+- [x] AC10 Падіння БД → 503 + Retry-After, readiness 503, liveness 200 — F1–F3, `make chaos`.
+- [x] AC11 Deadlock → повтор, інші помилки — без повтору — R1–R3.
