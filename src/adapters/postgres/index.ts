@@ -8,6 +8,7 @@ import type {
 } from '../../modules/tickets/index.js';
 import type { Volunteer, VolunteerRepository } from '../../modules/volunteers/index.js';
 import type { Category } from '../../shared/categories.js';
+import { DomainError } from '../../shared/errors.js';
 import { Db } from './pool.js';
 import { withRetry } from './retry.js';
 
@@ -58,10 +59,16 @@ const TICKET_COLS =
 function txOps(db: Db, c: pg.PoolClient): TicketTx {
   return {
     async findById(id) {
-      const { rows } = await db.query(`SELECT ${TICKET_COLS} FROM tickets WHERE id = $1`, [id], c);
+      const { rows } = await db.query(
+        `SELECT ${TICKET_COLS} FROM tickets WHERE id = $1 FOR UPDATE`,
+        [id],
+        c,
+      );
       return rows[0] ? toTicket(rows[0]) : null;
     },
-    async lockEventForRegistration() {},
+    async lockEventForRegistration(eventId) {
+      await db.query('SELECT 1 FROM events WHERE id = $1 FOR UPDATE', [eventId], c);
+    },
     async findByIdempotencyKey(key) {
       const { rows } = await db.query(
         `SELECT ${TICKET_COLS} FROM tickets WHERE idempotency_key = $1`,
@@ -106,11 +113,23 @@ function txOps(db: Db, c: pg.PoolClient): TicketTx {
       return rowCount === 1 ? 'inserted' : 'duplicate';
     },
     async save(t) {
-      await db.query(
-        'UPDATE tickets SET status = $2, volunteer_id = $3 WHERE id = $1',
-        [t.id, t.status, t.volunteerId],
-        c,
-      );
+      try {
+        await db.query(
+          'UPDATE tickets SET status = $2, volunteer_id = $3 WHERE id = $1',
+          [t.id, t.status, t.volunteerId],
+          c,
+        );
+      } catch (err) {
+        const e = err as { code?: string; constraint?: string };
+        if (e.code === '23505' && e.constraint === 'tickets_one_in_repair_per_volunteer') {
+          throw new DomainError(
+            'CONFLICT',
+            'Volunteer already has an item in repair',
+            'VOLUNTEER_BUSY',
+          );
+        }
+        throw err;
+      }
     },
     async addTransition(t) {
       await db.query(
