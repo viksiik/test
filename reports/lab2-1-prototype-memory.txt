@@ -1,0 +1,47 @@
+▶ Конкурентність [STORAGE=memory]
+  ✔ C1 (I3) 12 паралельних реєстрацій при ліміті 5 → рівно 5 створено (185.851848ms)
+  ✔ C2 (I1) двоє майстрів одночасно беруть одну річ → рівно один успіх (80.243324ms)
+  ✔ C3 (I2) майстер одночасно бере дві речі → рівно одна в роботі (65.790332ms)
+  ✔ C4 (I4) 6 паралельних повторів з одним ключем → один тікет, без 5xx (33.958452ms)
+  ✖ C5 (I4) той самий ключ з іншим тілом → 409, а не чужий тікет (59.263135ms)
+✖ Конкурентність [STORAGE=memory] (428.021427ms)
+▶ Сценарії [STORAGE=memory]
+  ✔ S1 реєстрація речі → 201, queued, історія з 1 переходу (161.9867ms)
+  ✔ S2 повтор з тим самим Idempotency-Key → 200, той самий тікет (49.829678ms)
+  ✔ S3 помилкові входи: закрита сесія 409, невідома 404, схема 400 (67.976697ms)
+  ✔ S4 ліміт черги: 6-та річ у сесії з лімітом 5 → 409 QUEUE_FULL (35.122167ms)
+  ✔ S5 взяття в роботу: навичка, зайнятий майстер, вже взята річ (60.061439ms)
+  ✔ S6 завершення: fixed звільняє майстра і місце в черзі (59.842464ms)
+  ✔ S7 завершити може лише призначений майстер (37.089913ms)
+  ✔ S8 needs_parts → requeue → withdraw; історія повна (42.713457ms)
+  ✔ S9 заборонений перехід → 409 ILLEGAL_TRANSITION, стан не змінився (29.592916ms)
+  ✔ S10 черга сесії показує ім'я майстра (49.336309ms)
+✔ Сценарії [STORAGE=memory] (614.504065ms)
+ℹ tests 15
+ℹ suites 2
+ℹ pass 14
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1997.615827
+
+✖ failing tests:
+
+test at test/concurrency.test.ts:1:3004
+✖ C5 (I4) той самий ключ з іншим тілом → 409, а не чужий тікет (59.263135ms)
+  AssertionError [ERR_ASSERTION]: got 200, id 61a1f2d0-bef0-4e13-b594-22386657f869
+  
+  200 !== 409
+  
+      at TestContext.<anonymous> (/home/claude/repair-cafe/test/concurrency.test.ts:66:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 200,
+    expected: 409,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -24,6 +24,21 @@ module.exports = {
       },
     },
     {
+      name: 'outside-uses-module-public-api',
+      comment: 'C-09: адаптери й платформа теж бачать модуль лише через його index.ts.',
+      severity: 'error',
+      from: { path: '^src/', pathNot: '^src/modules/' },
+      to: { path: '^src/modules/[^/]+/', pathNot: '^src/modules/[^/]+/index\\.ts$' },
+    },
+    {
+      name: 'adapters-only-in-composition-root',
+      comment:
+        'C-17 / spec §1: конкретне сховище (memory/postgres) обирає лише app.ts. Модулі й платформа працюють через порти.',
+      severity: 'error',
+      from: { path: '^src/', pathNot: ['^src/app\\.ts$', '^src/adapters/'] },
+      to: { path: '^src/adapters/' },
+    },
+    {
       name: 'domain-is-pure',
       comment:
         'C-10 / spec §1: domain.ts не залежить від фреймворків, platform чи інфраструктури. Дозволено лише shared/ та node:-модулі.',
