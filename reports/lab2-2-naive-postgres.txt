@@ -1,0 +1,87 @@
+▶ Конкурентність [STORAGE=postgres]
+  ✖ C1 (I3) 12 паралельних реєстрацій при ліміті 5 → рівно 5 створено (357.926583ms)
+  ✔ C2 (I1) двоє майстрів одночасно беруть одну річ → рівно один успіх (123.266142ms)
+  ✔ C3 (I2) майстер одночасно бере дві речі → рівно одна в роботі (92.296836ms)
+  ✖ C4 (I4) 6 паралельних повторів з одним ключем → один тікет, без 5xx (96.436314ms)
+  ✖ C5 (I4) той самий ключ з іншим тілом → 409, а не чужий тікет (97.161157ms)
+✖ Конкурентність [STORAGE=postgres] (771.905211ms)
+▶ Сценарії [STORAGE=postgres]
+  ✔ S1 реєстрація речі → 201, queued, історія з 1 переходу (263.832634ms)
+  ✔ S2 повтор з тим самим Idempotency-Key → 200, той самий тікет (80.701375ms)
+  ✔ S3 помилкові входи: закрита сесія 409, невідома 404, схема 400 (81.892074ms)
+  ✔ S4 ліміт черги: 6-та річ у сесії з лімітом 5 → 409 QUEUE_FULL (91.378226ms)
+  ✔ S5 взяття в роботу: навичка, зайнятий майстер, вже взята річ (115.916767ms)
+  ✔ S6 завершення: fixed звільняє майстра і місце в черзі (119.298885ms)
+  ✔ S7 завершити може лише призначений майстер (101.078849ms)
+  ✔ S8 needs_parts → requeue → withdraw; історія повна (117.390108ms)
+  ✔ S9 заборонений перехід → 409 ILLEGAL_TRANSITION, стан не змінився (108.437408ms)
+  ✔ S10 черга сесії показує ім'я майстра (105.64352ms)
+✔ Сценарії [STORAGE=postgres] (1190.266825ms)
+ℹ tests 15
+ℹ suites 2
+ℹ pass 12
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3135.509466
+
+✖ failing tests:
+
+test at test/concurrency.test.ts:1:575
+✖ C1 (I3) 12 паралельних реєстрацій при ліміті 5 → рівно 5 створено (357.926583ms)
+  AssertionError [ERR_ASSERTION]: codes: 201,201,201,201,201,201,409,201,201,409,201,201
+  
+  10 !== 5
+  
+      at TestContext.<anonymous> (test/concurrency.test.ts:23:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Promise.all (index 0)
+      at async Suite.run (node:internal/test_runner/test:1442:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 10,
+    expected: 5,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/concurrency.test.ts:1:2440
+✖ C4 (I4) 6 паралельних повторів з одним ключем → один тікет, без 5xx (96.436314ms)
+  AssertionError [ERR_ASSERTION]: codes: 201,500,500,500,500,500
+      at TestContext.<anonymous> (test/concurrency.test.ts:50:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/concurrency.test.ts:1:3004
+✖ C5 (I4) той самий ключ з іншим тілом → 409, а не чужий тікет (97.161157ms)
+  AssertionError [ERR_ASSERTION]: got 200, id 9210d18c-f71c-4a9c-a3b7-9b499ee3cc91
+  
+  200 !== 409
+  
+      at TestContext.<anonymous> (test/concurrency.test.ts:66:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 200,
+    expected: 409,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+# Повторні прогони C2/C3 на наївній версії (гонка недетермінована)
+$ for i in $(seq 1 15); do STORAGE=postgres node --import tsx --test --test-name-pattern="C2|C3" test/concurrency.test.ts | grep codes; done | sort | uniq -c
+      9         codes: 200,200
+# → у 9 з 30 запусків (15 × 2 тести) обидва паралельні claim отримали 200: інваріант I1/I2 порушено.

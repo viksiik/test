@@ -32,6 +32,14 @@ make check       # усі перевірки (те саме, що й hooks)
 make run         # сервер на :3000, версія = поточний git sha
 make version     # {"name":"repair-cafe","version":"<sha>"}
 make hook-demo   # доказ, що hook блокує брудний коміт
+
+# Лаба 2: прототип → PostgreSQL
+make scenarios                     # сценарії на статичних даних (без БД)
+make db-up migrate seed            # PostgreSQL 16 у docker + схема + seed
+make scenarios-db                  # ті самі сценарії + конкурентність + збої + бюджет запитів
+make race                          # конкурентні тести 20 разів поспіль
+make chaos                         # зупинити/підняти БД під запущеним сервером
+STORAGE=postgres make run          # сервер на БД (за замовчуванням — статика)
 ```
 
 ## Де що лежить
@@ -40,5 +48,7 @@ make hook-demo   # доказ, що hook блокує брудний коміт
 - [standards/](standards/) — власні інженерні стандарти (spec, ADR, DoD, перевірки)
 - [adr/](adr/) — архітектурні рішення (MADR)
 - [docs/audit-lab1.md](docs/audit-lab1.md) — аудит структури проти spec
-- [DEFENSE.md](DEFENSE.md) — точка входу для рев'ю
+- [DEFENSE.md](DEFENSE.md) — точка входу для рев'ю (поточна лаба; попередні — [docs/defense/](docs/defense/))
+- [docs/audit-lab2.md](docs/audit-lab2.md) — аудит сценаріїв, запитів і збоїв
+- [migrations/](migrations/) — схема БД, [standards/db.md](standards/db.md) — правила роботи з БД
 - [ai/](ai/) — слід промптів і аудит виходу AI
